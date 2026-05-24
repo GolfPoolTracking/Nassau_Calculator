@@ -22,8 +22,9 @@ if len(set(players)) != num_players or "" in players:
     st.warning("Please ensure all players have unique, non-empty names.")
     st.stop()
 
-# Initialize balance sheet
-balances = {p: 0.0 for p in players}
+# Initialize pairwise debt matrix (who owes who)
+# pairwise_debts[debtor][creditor] = amount
+pairwise_debts = {p1: {p2: 0.0 for p2 in players} for p1 in players}
 
 # --- 2. 2's Competition ---
 st.header("2. 2's Competition")
@@ -36,14 +37,11 @@ if play_twos:
     with col2:
         twos_payer = st.selectbox("Who paid for the 2's?", players)
     
-    # Calculate 2's balances
+    # Calculate 2's debts
     for p in players:
-        if p == twos_payer:
-            # Payer gets owed the fee by everyone else
-            balances[p] += twos_fee * (num_players - 1)
-        else:
-            # Everyone else owes the fee
-            balances[p] -= twos_fee
+        if p != twos_payer:
+            # Everyone else owes the payer the fee
+            pairwise_debts[p][twos_payer] += twos_fee
 
 # --- 3. Nassau Match ---
 st.header("3. Nassau Match (€2-€2-€2)")
@@ -71,13 +69,11 @@ if nassau_overall == "Halved":
     overall_bet = 0.0 # Nobody wins the final rollover pot
 
 def apply_nassau_winnings(winner, bet_amount):
-    """If a player wins a leg, everyone else pays them the bet amount."""
+    """If a player wins a leg, everyone else owes them the bet amount."""
     if winner != "Halved" and bet_amount > 0:
         for p in players:
-            if p == winner:
-                balances[p] += bet_amount * (num_players - 1)
-            else:
-                balances[p] -= bet_amount
+            if p != winner:
+                pairwise_debts[p][winner] += bet_amount
 
 apply_nassau_winnings(nassau_f9, f9_bet)
 apply_nassau_winnings(nassau_b9, b9_bet)
@@ -93,7 +89,7 @@ if eddie_playing and dale_playing:
     st.header("4. Side Game (Eddie vs Dale)")
     st.caption("Birdies = €1, Eagles = €2")
     
-    # Extract exact typed names to update the balance dict correctly
+    # Extract exact typed names
     eddie_name = next(p for p in players if "eddie" in p.lower())
     dale_name = next(p for p in players if "dale" in p.lower())
     
@@ -111,28 +107,61 @@ if eddie_playing and dale_playing:
     eddie_pts = (eddie_birdies * 1) + (eddie_eagles * 2)
     dale_pts = (dale_birdies * 1) + (dale_eagles * 2)
     
-    eddie_net_side_game = eddie_pts - dale_pts
-    balances[eddie_name] += eddie_net_side_game
-    balances[dale_name] -= eddie_net_side_game
-
+    net_diff = eddie_pts - dale_pts
+    
+    if net_diff > 0:
+        # Eddie won more points, Dale owes Eddie
+        pairwise_debts[dale_name][eddie_name] += net_diff
+    elif net_diff < 0:
+        # Dale won more points, Eddie owes Dale
+        pairwise_debts[eddie_name][dale_name] += abs(net_diff)
 
 # --- 5. Final Settlement & Netting ---
 st.header("5. Final Settlement")
 
-with st.expander("Show Gross Balances Before Netting"):
-    st.json({k: f"€{v:.2f}" for k, v in balances.items()})
+st.subheader("Individual Breakdown (Who owes who)")
+st.caption("This is the exact ledger of debts between individual players before group netting.")
 
-# Separate into who owes money (debtors) and who is owed money (creditors)
+has_individual_debts = False
+for i in range(len(players)):
+    for j in range(i + 1, len(players)):
+        p1 = players[i]
+        p2 = players[j]
+        
+        # Calculate the net position between just these two players
+        net_p1_to_p2 = pairwise_debts[p1][p2] - pairwise_debts[p2][p1]
+        
+        if net_p1_to_p2 > 0.01:
+            st.write(f"🔹 **{p1}** owes **{p2}** €{net_p1_to_p2:.2f}")
+            has_individual_debts = True
+        elif net_p1_to_p2 < -0.01:
+            st.write(f"🔹 **{p2}** owes **{p1}** €{abs(net_p1_to_p2):.2f}")
+            has_individual_debts = True
+
+if not has_individual_debts:
+    st.info("Nobody owes anyone anything individually.")
+
+st.divider()
+
+# Calculate overall global balances for the optimized fewest payments
+balances = {p: 0.0 for p in players}
+for debtor in players:
+    for creditor in players:
+        amount = pairwise_debts[debtor][creditor]
+        balances[debtor] -= amount
+        balances[creditor] += amount
+
+# Separate into who owes money globally (debtors) and who is owed money globally (creditors)
 debtors = []
 creditors = []
 
 for p, b in balances.items():
-    if b < -0.01: # Use 0.01 to avoid float precision issues
+    if b < -0.01:
         debtors.append({"name": p, "amount": abs(b)})
     elif b > 0.01:
         creditors.append({"name": p, "amount": b})
 
-# Sort descending: largest debtors pay largest creditors first (greedy algorithm to minimize transactions)
+# Sort descending: largest debtors pay largest creditors first
 debtors.sort(key=lambda x: x["amount"], reverse=True)
 creditors.sort(key=lambda x: x["amount"], reverse=True)
 
@@ -146,7 +175,7 @@ while i < len(debtors) and j < len(creditors):
     # The transaction amount is the smaller of the debt or the credit
     amount = min(debtor["amount"], creditor["amount"])
     
-    transactions.append(f"**{debtor['name']}** pays **{creditor['name']}** €{amount:.2f}")
+    transactions.append(f"✅ **{debtor['name']}** pays **{creditor['name']}** €{amount:.2f}")
     
     # Adjust balances
     debtor["amount"] -= amount
@@ -158,7 +187,8 @@ while i < len(debtors) and j < len(creditors):
     if creditor["amount"] < 0.01:
         j += 1
 
-st.subheader("Fewest Payments to Settle Up:")
+st.subheader("Optimized Settlement")
+st.caption("The mathematically fewest transactions to settle all debts across the group.")
 if transactions:
     for t in transactions:
         st.success(t)
