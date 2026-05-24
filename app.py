@@ -14,7 +14,8 @@ SHEET_URL = "https://docs.google.com/spreadsheets/d/1JFo65TUfuRE4WKK4YTrIi0M92yG
 # --- 1. Display Persistent Latest Results ---
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(spreadsheet=SHEET_URL, usecols=[0, 1, 2, 3])
+    # ttl=0 forces Streamlit to fetch the live sheet, bypassing the cache
+    df = conn.read(spreadsheet=SHEET_URL, ttl=0)
     
     if not df.empty and "Date" in df.columns:
         df = df.dropna(subset=['Date'])
@@ -23,9 +24,13 @@ try:
             latest_row = df.iloc[-1]
             
             with st.container(border=True):
-                st.subheader("📌 Latest Saved Results")
-                st.caption(f"Round from {latest_row['Date']}")
-                st.write(f"**Players:** {latest_row['Players']}")
+                st.subheader("📌 Latest Saved Round Details")
+                st.write(f"**Date:** {latest_row['Date']} | **Players:** {latest_row['Players']}")
+                
+                # Show the match details if they exist in the sheet
+                if "Match Details" in df.columns and pd.notna(latest_row['Match Details']):
+                    st.markdown("**How it played out:**")
+                    st.info(latest_row['Match Details'])
                 
                 col1, col2 = st.columns(2)
                 with col1:
@@ -37,7 +42,7 @@ try:
                     
             st.divider()
 except Exception as e:
-    # If the sheet is completely empty or fails to load, just silently continue to the input form
+    # If the sheet is completely empty or fails to load, just silently continue
     pass
 
 
@@ -61,6 +66,7 @@ if len(set(players)) != num_players or "" in players:
     st.stop()
 
 pairwise_debts = {p1: {p2: 0.0 for p2 in players} for p1 in players}
+match_summary_lines = []
 
 # --- 2's Competition ---
 st.subheader("2's Competition")
@@ -73,6 +79,8 @@ if play_twos:
     with col2:
         twos_payer = st.selectbox("Who paid for the 2's?", players)
     
+    match_summary_lines.append(f"• 2's Comp: {twos_payer} paid (€{twos_fee} each).")
+    
     for p in players:
         if p != twos_payer:
             pairwise_debts[p][twos_payer] += twos_fee
@@ -84,6 +92,8 @@ st.caption("If a leg is halved, its value rolls over to the next leg.")
 nassau_f9 = st.selectbox("Front 9 Winner", ["Halved"] + players)
 nassau_b9 = st.selectbox("Back 9 Winner", ["Halved"] + players)
 nassau_overall = st.selectbox("Overall Winner", ["Halved"] + players)
+
+match_summary_lines.append(f"• Nassau: F9: {nassau_f9} | B9: {nassau_b9} | Overall: {nassau_overall}")
 
 base_bet = 2.0
 f9_bet = base_bet
@@ -133,6 +143,8 @@ if eddie_playing and dale_playing:
         dale_birdies = st.number_input(f"{dale_name}'s Birdies", min_value=0, value=0, step=1)
         dale_eagles = st.number_input(f"{dale_name}'s Eagles", min_value=0, value=0, step=1)
         
+    match_summary_lines.append(f"• Side Game: {eddie_name} ({eddie_birdies}B, {eddie_eagles}E) vs {dale_name} ({dale_birdies}B, {dale_eagles}E)")
+        
     eddie_pts = (eddie_birdies * 1) + (eddie_eagles * 2)
     dale_pts = (dale_birdies * 1) + (dale_eagles * 2)
     
@@ -142,6 +154,9 @@ if eddie_playing and dale_playing:
         pairwise_debts[dale_name][eddie_name] += net_diff
     elif net_diff < 0:
         pairwise_debts[eddie_name][dale_name] += abs(net_diff)
+
+# Compile match details string
+match_details_str = "\n".join(match_summary_lines)
 
 # --- Final Settlement & Netting ---
 st.header("Final Settlement")
@@ -228,15 +243,20 @@ if st.button("💾 Save & Overwrite Results"):
         conn = st.connection("gsheets", type=GSheetsConnection)
         
         # Create a single-row dataframe (this replaces the history entirely)
+        # Added the Match Details column here to capture the inputs
         new_row = pd.DataFrame([{
             "Date": str(date_played),
             "Players": ", ".join(players),
+            "Match Details": match_details_str,
             "Individual Breakdown": breakdown_str,
             "Optimized Settlement": settlement_str
         }])
         
-        # We pass ONLY the new_row so it overwrites whatever was there previously
+        # Overwrite whatever was there previously
         conn.update(spreadsheet=SHEET_URL, worksheet="Sheet1", data=new_row)
+        
+        # Clear Streamlit's cache to ensure the read at the top of the app gets this new row
+        st.cache_data.clear()
         
         st.success(f"Results successfully updated!")
         
