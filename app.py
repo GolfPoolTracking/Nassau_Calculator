@@ -3,6 +3,11 @@ import pandas as pd
 import datetime
 from streamlit_gsheets import GSheetsConnection
 
+#Ping to keep app and DB alive
+if st.query_params.get("view") == "ping":
+    st.write("Server is awake and ready! 🟢")
+    st.stop()
+
 st.set_page_config(page_title="Golf Bet Settler", page_icon="⛳", layout="centered")
 
 st.title("⛳ Golf Bet Settler")
