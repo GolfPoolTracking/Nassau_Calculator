@@ -86,15 +86,16 @@ if play_twos:
     with col2:
         twos_payer = st.selectbox("Who paid for the 2's?", players)
     
-    match_summary_lines.append(f"- **2's Comp:** {twos_payer} paid (€{twos_fee} each).")
+    match_summary_lines.append(f"- **2's Comp:** {twos_payer} paid (€{twos_fee:.2f} each).")
     
     for p in players:
         if p != twos_payer:
             pairwise_debts[p][twos_payer] += twos_fee
 
 # --- Nassau Match ---
-st.subheader("Nassau Match (€2-€2-€2)")
-st.caption("If a leg is halved, its value rolls over to the next leg.")
+st.subheader("Nassau Match")
+base_bet = st.number_input("Base bet per leg (€)", min_value=0.0, value=2.0, step=0.5)
+st.caption(f"Playing €{base_bet:.2f}-€{base_bet:.2f}-€{base_bet:.2f}. If a leg is halved, its value rolls over to the next leg.")
 
 nassau_f9 = st.selectbox("Front 9 Winner", ["Halved"] + players)
 nassau_b9 = st.selectbox("Back 9 Winner", ["Halved"] + players)
@@ -102,7 +103,6 @@ nassau_overall = st.selectbox("Overall Winner", ["Halved"] + players)
 
 match_summary_lines.append(f"- **Nassau:** F9: {nassau_f9} | B9: {nassau_b9} | Overall: {nassau_overall}")
 
-base_bet = 2.0
 f9_bet = base_bet
 b9_bet = base_bet
 overall_bet = base_bet
