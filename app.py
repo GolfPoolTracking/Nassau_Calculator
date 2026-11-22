@@ -10,6 +10,10 @@ if st.query_params.get("view") == "ping":
 
 st.set_page_config(page_title="Golf Bet Settler", page_icon="⛳", layout="centered")
 
+# --- Error reporting (Sentry) ---
+from sentry_setup import init_sentry  # noqa: E402
+init_sentry()
+
 st.title("⛳ Golf Bet Settler")
 st.markdown("Calculate and net off all golf bets to leave the fewest payments possible.")
 
