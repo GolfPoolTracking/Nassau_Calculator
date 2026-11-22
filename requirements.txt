@@ -1,3 +1,4 @@
 streamlit
 pandas
 st-gsheets-connection
+sentry-sdk>=2.0,<3
